@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/janeshirley/tinker/agent"
-	"github.com/janeshirley/tinker/model/openaicompat"
+	"github.com/111hell/tinker/agent"
+	"github.com/111hell/tinker/model/openaicompat"
 )
 
 type searchInput struct {

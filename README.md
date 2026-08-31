@@ -21,7 +21,7 @@ Tinker 只负责这个循环。Session、Memory、Transport 和业务调度仍�
 ## 安装
 
 ```sh
-go get github.com/janeshirley/tinker
+go get github.com/111hell/tinker
 ```
 
 Tinker 需要 Go 1.27 或更高版本。

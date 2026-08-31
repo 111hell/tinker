@@ -1,4 +1,4 @@
-module github.com/janeshirley/tinker
+module github.com/111hell/tinker
 
 go 1.27.0
 
