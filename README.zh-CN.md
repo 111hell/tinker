@@ -4,7 +4,7 @@
 
 > 一个用于工具调用 Agent 的小型 Go Runtime。
 
-Tinker 提供 Provider 无关、可取消的 `model → tool → model` 循环，并支持流式事件和按需加载 Skill。Session、Memory、Transport 和 Scheduler 仍由应用负责。
+Tinker 是一个轻量、模型无关的 Go Agent Runtime。它负责驱动模型与工具的交互，并以流式事件暴露运行过程；Session、Memory 和应用生命周期由调用方管理。
 
 ## 安装
 

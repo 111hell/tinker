@@ -4,7 +4,7 @@
 
 > A small Go runtime for tool-using agents.
 
-Tinker provides a provider-neutral, cancellable `model → tool → model` loop with streaming events and on-demand skills. Applications retain ownership of sessions, memory, transport, and scheduling.
+Tinker is a small, model-agnostic Go agent runtime. It drives model–tool interactions and exposes execution as streaming events, while the application owns sessions, memory, and lifecycle.
 
 ## Install
 
