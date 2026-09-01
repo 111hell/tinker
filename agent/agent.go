@@ -93,13 +93,19 @@ func (a *Agent) stream(ctx context.Context, messages []Message, emit func(Event)
 		message.Text += delta.Text
 		message.Reasoning += delta.Reasoning
 		if delta.ToolCall != nil {
-			for len(message.ToolCalls) <= delta.ToolCall.Index {
+			toolCall := delta.ToolCall
+			if toolCall.Index < 0 {
+				return Message{}, Usage{}, fmt.Errorf("tool call index must be non-negative: %d", toolCall.Index)
+			}
+			for len(message.ToolCalls) <= toolCall.Index {
 				message.ToolCalls = append(message.ToolCalls, ToolCall{})
 			}
-			call := &message.ToolCalls[delta.ToolCall.Index]
-			call.ID += delta.ToolCall.ID
-			call.Name += delta.ToolCall.Name
-			call.Arguments += delta.ToolCall.ArgumentsDelta
+			call := &message.ToolCalls[toolCall.Index]
+			if toolCall.ID != "" {
+				call.ID = toolCall.ID
+			}
+			call.Name += toolCall.Name
+			call.Arguments += toolCall.ArgumentsDelta
 		}
 		usage = delta.Usage
 		if (delta.Text != "" || delta.Reasoning != "") &&

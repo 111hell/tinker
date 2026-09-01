@@ -83,7 +83,7 @@ func (m *Model) Stream(ctx context.Context, request agent.Request) iter.Seq2[age
 				}
 				for _, call := range choice.Delta.ToolCalls {
 					if !yield(agent.Delta{ToolCall: &agent.ToolCallDelta{
-						Index: int(call.Index), ID: call.ID, Name: call.Function.Name,
+						Index: max(int(call.Index), 0), ID: call.ID, Name: call.Function.Name,
 						ArgumentsDelta: call.Function.Arguments,
 					}}, nil) {
 						return
