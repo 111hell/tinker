@@ -29,10 +29,16 @@ func New(config Config) (*Agent, error) {
 // Run adds input as a user message and runs until the model stops or an error occurs.
 // The caller must provide a context with a deadline to bound the model-tool loop.
 func (a *Agent) Run(ctx context.Context, history []Message, input string) iter.Seq2[Event, error] {
+	return a.RunMessage(ctx, history, UserMessage(input))
+}
+
+// RunMessage adds user Message and runs until the model stops or an error occurs.
+// It supports multimodal messages with text and image URLs.
+// The caller must provide a context with a deadline to bound the model-tool loop.
+func (a *Agent) RunMessage(ctx context.Context, history []Message, user Message) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		emit := func(event Event) bool { return yield(event, nil) }
 		messages := append([]Message(nil), history...)
-		user := UserMessage(input)
 		messages = append(messages, user)
 		var total Usage
 

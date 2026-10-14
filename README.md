@@ -25,6 +25,8 @@ OPENAI_API_KEY=... OPENAI_MODEL=... \
 
 See the runnable [`example`](example/) for the complete setup. OpenAI-compatible providers can be configured with `OPENAI_BASE_URL`.
 
+For multi-turn conversation history, see [`example/conversation`](example/conversation/).
+
 ## API
 
 - `agent.Model` streams provider-neutral model output.

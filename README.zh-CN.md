@@ -25,6 +25,8 @@ OPENAI_API_KEY=... OPENAI_MODEL=... \
 
 完整配置见可运行的 [`example`](example/)。OpenAI 兼容服务可通过 `OPENAI_BASE_URL` 配置。
 
+多轮对话历史的处理方式见 [`example/conversation`](example/conversation/)。
+
 ## API
 
 - `agent.Model`：输出 Provider 无关的模型流。

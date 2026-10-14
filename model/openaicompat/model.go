@@ -77,8 +77,21 @@ func (m *Model) Stream(ctx context.Context, request agent.Request) iter.Seq2[age
 				if choice.Index != 0 {
 					continue
 				}
-				delta := agent.Delta{Text: choice.Delta.Content + choice.Delta.Refusal}
-				if delta.Text != "" && !yield(delta, nil) {
+				// Compatible providers expose reasoning as an extension field.
+				var extra struct {
+					ReasoningContent string `json:"reasoning_content"`
+					Reasoning        string `json:"reasoning"`
+				}
+				if err := json.Unmarshal([]byte(choice.Delta.RawJSON()), &extra); err != nil {
+					yield(agent.Delta{}, fmt.Errorf("openaicompat: decode reasoning: %w", err))
+					return
+				}
+				reasoning := extra.ReasoningContent
+				if reasoning == "" {
+					reasoning = extra.Reasoning
+				}
+				delta := agent.Delta{Text: choice.Delta.Content + choice.Delta.Refusal, Reasoning: reasoning}
+				if (delta.Text != "" || delta.Reasoning != "") && !yield(delta, nil) {
 					return
 				}
 				for _, call := range choice.Delta.ToolCalls {
@@ -133,9 +146,24 @@ func (m *Model) params(request agent.Request) (openai.ChatCompletionNewParams, e
 func messageParam(message agent.Message) (openai.ChatCompletionMessageParamUnion, error) {
 	switch message.Role {
 	case agent.UserRole:
-		return openai.UserMessage(message.Text), nil
+		if len(message.ImageURLs) == 0 {
+			return openai.UserMessage(message.Text), nil
+		}
+		parts := make([]openai.ChatCompletionContentPartUnionParam, 0, len(message.ImageURLs)+1)
+		if message.Text != "" {
+			parts = append(parts, openai.TextContentPart(message.Text))
+		}
+		for _, u := range message.ImageURLs {
+			parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+				URL: u,
+			}))
+		}
+		return openai.UserMessage(parts), nil
 	case agent.AssistantRole:
 		assistant := openai.ChatCompletionAssistantMessageParam{}
+		if message.Reasoning != "" {
+			assistant.SetExtraFields(map[string]any{"reasoning_content": message.Reasoning})
+		}
 		if message.Text != "" {
 			assistant.Content.OfString = param.NewOpt(message.Text)
 		}

@@ -32,11 +32,16 @@ type Message struct {
 	Role       Role
 	Text       string
 	Reasoning  string
+	ImageURLs  []string
 	ToolCalls  []ToolCall
 	ToolCallID string
 }
 
 func UserMessage(text string) Message { return Message{Role: UserRole, Text: text} }
+
+func UserImageMessage(text string, imageURLs ...string) Message {
+	return Message{Role: UserRole, Text: text, ImageURLs: imageURLs}
+}
 
 type ToolCall struct {
 	ID        string
