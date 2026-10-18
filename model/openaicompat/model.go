@@ -26,16 +26,25 @@ type Config struct {
 	Model string
 	// HTTPClient optionally replaces the SDK's default HTTP client.
 	HTTPClient *http.Client
+	// ReasoningEffort is sent verbatim; model-specific support is checked by the server.
+	// Empty preserves the server default. It does not enable visible reasoning output.
+	ReasoningEffort shared.ReasoningEffort
 }
 
 type Model struct {
 	client openai.Client
 	name   string
+	effort shared.ReasoningEffort
 }
 
 var _ agent.Model = (*Model)(nil)
 
 func New(config Config) (*Model, error) {
+	switch config.ReasoningEffort {
+	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max":
+	default:
+		return nil, fmt.Errorf("openaicompat: unsupported reasoning effort %q", config.ReasoningEffort)
+	}
 	if config.APIKey == "" || config.Model == "" {
 		return nil, errors.New("openaicompat: APIKey and Model are required")
 	}
@@ -52,7 +61,7 @@ func New(config Config) (*Model, error) {
 	if config.HTTPClient != nil {
 		opts = append(opts, option.WithHTTPClient(config.HTTPClient))
 	}
-	return &Model{client: openai.NewClient(opts...), name: config.Model}, nil
+	return &Model{client: openai.NewClient(opts...), name: config.Model, effort: config.ReasoningEffort}, nil
 }
 
 func (m *Model) Stream(ctx context.Context, request agent.Request) iter.Seq2[agent.Delta, error] {
@@ -64,6 +73,8 @@ func (m *Model) Stream(ctx context.Context, request agent.Request) iter.Seq2[age
 		stream := m.client.Chat.Completions.NewStreaming(ctx, params)
 		defer stream.Close()
 		var usage agent.Usage
+		var finish agent.FinishReason
+		ids := map[int64]string{}
 		for stream.Next() {
 			chunk := stream.Current()
 			if chunk.JSON.Usage.Valid() {
@@ -76,6 +87,20 @@ func (m *Model) Stream(ctx context.Context, request agent.Request) iter.Seq2[age
 			for _, choice := range chunk.Choices {
 				if choice.Index != 0 {
 					continue
+				}
+				switch choice.FinishReason {
+				case "":
+				case "stop":
+					finish = agent.FinishStop
+				case "tool_calls":
+					finish = agent.FinishToolCalls
+				case "length":
+					finish = agent.FinishLength
+				case "content_filter":
+					finish = agent.FinishBlocked
+				default:
+					yield(agent.Delta{}, fmt.Errorf("openaicompat: unsupported finish reason %q", choice.FinishReason))
+					return
 				}
 				// Compatible providers expose reasoning as an extension field.
 				var extra struct {
@@ -95,8 +120,13 @@ func (m *Model) Stream(ctx context.Context, request agent.Request) iter.Seq2[age
 					return
 				}
 				for _, call := range choice.Delta.ToolCalls {
+					if call.Index < 0 {
+						yield(agent.Delta{}, errors.New("openaicompat: negative tool call index"))
+						return
+					}
+					ids[call.Index] += call.ID
 					if !yield(agent.Delta{ToolCall: &agent.ToolCallDelta{
-						Index: max(int(call.Index), 0), ID: call.ID, Name: call.Function.Name,
+						Index: int(call.Index), ID: ids[call.Index], Name: call.Function.Name,
 						ArgumentsDelta: call.Function.Arguments,
 					}}, nil) {
 						return
@@ -108,7 +138,15 @@ func (m *Model) Stream(ctx context.Context, request agent.Request) iter.Seq2[age
 			yield(agent.Delta{}, err)
 			return
 		}
-		yield(agent.Delta{Usage: usage}, nil)
+		if err := ctx.Err(); err != nil {
+			yield(agent.Delta{}, err)
+			return
+		}
+		if finish == "" {
+			yield(agent.Delta{}, errors.New("openaicompat: stream ended without finish reason"))
+			return
+		}
+		yield(agent.Delta{Usage: usage, FinishReason: finish}, nil)
 	}
 }
 
@@ -126,12 +164,16 @@ func (m *Model) params(request agent.Request) (openai.ChatCompletionNewParams, e
 	}
 	tools := make([]openai.ChatCompletionToolUnionParam, 0, len(request.Tools))
 	for _, tool := range request.Tools {
-		var schema shared.FunctionParameters
-		if err := json.Unmarshal([]byte(tool.InputSchema), &schema); err != nil {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(tool.InputSchema), &fields); err != nil {
 			return openai.ChatCompletionNewParams{}, fmt.Errorf("openaicompat: tool %q schema: %w", tool.Name, err)
 		}
-		if schema == nil {
+		if fields == nil {
 			return openai.ChatCompletionNewParams{}, fmt.Errorf("openaicompat: tool %q schema must be a JSON object", tool.Name)
+		}
+		schema := make(shared.FunctionParameters, len(fields))
+		for key, value := range fields {
+			schema[key] = value
 		}
 		tools = append(tools, openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
 			Name: tool.Name, Description: param.NewOpt(tool.Description), Parameters: schema,
@@ -139,11 +181,20 @@ func (m *Model) params(request agent.Request) (openai.ChatCompletionNewParams, e
 	}
 	return openai.ChatCompletionNewParams{
 		Model: shared.ChatModel(m.name), Messages: messages, Tools: tools,
-		StreamOptions: openai.ChatCompletionStreamOptionsParam{IncludeUsage: param.NewOpt(true)},
+		ReasoningEffort: m.effort,
+		StreamOptions:   openai.ChatCompletionStreamOptionsParam{IncludeUsage: param.NewOpt(true)},
 	}, nil
 }
 
 func messageParam(message agent.Message) (openai.ChatCompletionMessageParamUnion, error) {
+	if message.Continuation != nil {
+		return openai.ChatCompletionMessageParamUnion{}, errors.New("openaicompat: protocol continuation is not supported")
+	}
+	if (message.Role != agent.UserRole && len(message.ImageURLs) != 0) ||
+		(message.Role != agent.AssistantRole && (message.Reasoning != "" || len(message.ToolCalls) != 0)) ||
+		(message.Role != agent.ToolRole && message.ToolCallID != "") {
+		return openai.ChatCompletionMessageParamUnion{}, errors.New("openaicompat: unsupported fields for message role")
+	}
 	switch message.Role {
 	case agent.UserRole:
 		if len(message.ImageURLs) == 0 {

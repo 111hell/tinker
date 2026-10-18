@@ -98,6 +98,13 @@ func (a *Agent) stream(ctx context.Context, messages []Message, emit func(Event)
 		}
 		message.Text += delta.Text
 		message.Reasoning += delta.Reasoning
+		if delta.Continuation != nil {
+			message.Continuation = &Continuation{Protocol: delta.Continuation.Protocol,
+				Data: append(json.RawMessage(nil), delta.Continuation.Data...)}
+		}
+		if delta.FinishReason != "" {
+			message.FinishReason = delta.FinishReason
+		}
 		if delta.ToolCall != nil {
 			toolCall := delta.ToolCall
 			if toolCall.Index < 0 {
@@ -113,10 +120,27 @@ func (a *Agent) stream(ctx context.Context, messages []Message, emit func(Event)
 			call.Name += toolCall.Name
 			call.Arguments += toolCall.ArgumentsDelta
 		}
-		usage = delta.Usage
-		if (delta.Text != "" || delta.Reasoning != "") &&
+		if delta.Usage != (Usage{}) {
+			usage = delta.Usage
+		}
+		if (delta.Text != "" || delta.Reasoning != "" || delta.ToolCall != nil ||
+			delta.Usage != (Usage{}) || delta.FinishReason != "" || delta.Continuation != nil) &&
 			!emit(Event{Type: MessageDelta, Delta: delta}) {
 			return Message{}, Usage{}, errConsumerStopped
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return Message{}, usage, err
+	}
+	switch message.FinishReason {
+	case FinishLength:
+		return message, usage, ErrTruncated
+	case FinishBlocked:
+		return message, usage, ErrBlocked
+	}
+	for _, call := range message.ToolCalls {
+		if call.ID == "" || call.Name == "" {
+			return message, usage, errors.New("agent: tool call lacks ID or name")
 		}
 	}
 	return message, usage, nil
